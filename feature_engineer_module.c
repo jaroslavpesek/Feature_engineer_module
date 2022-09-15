@@ -55,7 +55,6 @@
 #include <unirec/ur_time.h>
 #include <unirec/ur_values.h>
 #include "fields.h"
-
 /**
  * Define input template spec and output template spec.
  */
