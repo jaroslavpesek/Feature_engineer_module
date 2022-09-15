@@ -22,7 +22,7 @@ PKG_CHECK_MODULES([libtrap], [libtrap], [TRAPLIB="yes"])
 if test -n "$TRAPLIB"; then
   LDFLAGS="$libtrap_LDFLAGS $LDFLAGS"
   LIBS="$libtrap_LIBS $LIBS"
-  CFLAGS="$libtrap_CFLAGS $CFLAGS"
+  CFLAGS="$libtrap_CFLAGS $CFLAGS -Wall -Wextra -pedantic"
   CXXFLAGS="$libtrap_CFLAGS $CXXFLAGS"
 else
   AC_MSG_ERROR([Libtrap was not found.])
