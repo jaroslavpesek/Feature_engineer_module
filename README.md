@@ -29,7 +29,7 @@ Important: Nemea-Framework has to be compiled (or installed) in advance.
 This module contains example of module implementation using TRAP platform.
 
 ## Interfaces
-- Inputs: 0
+- Inputs: 1
 - Outputs: 1
 
 ## Parameters
