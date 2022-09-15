@@ -9,7 +9,7 @@
         "type": "cppdbg",
         "request": "launch",
         "program": "${workspaceFolder}/feature_engineer_module",
-        "args": ["-i", "\"u:socket,u:prdel\""],
+        "args": ["-i", "\"u:alf_predictor_socket,u:sink\""],
         "stopAtEntry": false,
         "cwd": "${fileDirname}",
         "environment": [],

@@ -1,13 +1,11 @@
 /**
  * \file feature_engineer_module.c
  * \brief Example of NEMEA module.
- * \author Vaclav Bartos <ibartosv@fit.vutbr.cz>
- * \author Marek Svepes <svepemar@fit.cvut.cz>
  * \author Jaroslav Pesek <jaroslav.pesek@fit.cvut.cz>
  * \date 2022
  */
 /*
- * Copyright (C) 2013,2014,2015,2016,2017,2018,2019,2020,2021,2022 CESNET
+ * Copyright (C) 2022 CESNET
  *
  * LICENSE TERMS
  *
@@ -54,17 +52,18 @@
 #include <unirec/unirec.h>
 #include <unirec/ur_time.h>
 #include <unirec/ur_values.h>
+#include <limits.h>
 #include "fields.h"
+
 /**
- * Define input template spec and output template spec.
+ * Define input template spec and newly calculated features
  */
-#define IN_SPEC "DST_IP,SRC_IP,BYTES,BYTES_REV,TIME_FIRST,TIME_LAST,PACKETS,PACKETS_REV,PPI_PKT_LENGTHS"
-#define OUT_SPEC "BYTES_PER_MS,BYTES_RATIO,TIME_DUR_MS,DST_IP,SRC_IP,BYTES,BYTES_REV,TIME_FIRST,TIME_LAST,PACKETS,PACKETS_REV,PPI_PKT_LENGTHS"
+#define IN_SPEC "DST_IP,SRC_IP,BYTES,BYTES_REV,TIME_FIRST,TIME_LAST,PACKETS,PACKETS_REV,PPI_PKT_DIRECTIONS,PPI_PKT_LENGTHS,PPI_PKT_TIMES,PPI_PKT_FLAGS"
+#define NEW_FEATURES "MAX_PKT_LEN,MIN_PKT_LEN,VAR_PKT_LENGTH,MEAN_PKT_LENGTH,MEAN_TIME_BETWEEN_PKTS,RECV_PERCENTAGE,SENT_PERCENTAGE,BYTES_TOTAL,PACKETS_TOTAL,PACKETS_RATIO,PACKETS_PER_MS,BYTES_PER_MS,BYTES_RATIO,TIME_DUR_MS"
 
 /**
  * Definition of fields used in unirec templates (for both input and output interfaces)
  */
-
 UR_FIELDS (
    ipaddr DST_IP,
    ipaddr SRC_IP,
@@ -77,11 +76,24 @@ UR_FIELDS (
    double BYTES_RATIO,
    uint64 TIME_DUR_MS,
    double BYTES_PER_MS,
+   double PACKETS_PER_MS,
+   double PACKETS_RATIO,
+   uint64 BYTES_TOTAL,
+   uint32 PACKETS_TOTAL,
+   int8* PPI_PKT_DIRECTIONS,
    uint16* PPI_PKT_LENGTHS,
+   time* PPI_PKT_TIMES,
+   uint8* PPI_PKT_FLAGS,
+   double SENT_PERCENTAGE,
+   double RECV_PERCENTAGE,
+   double MEAN_TIME_BETWEEN_PKTS,
+   double MEAN_PKT_LENGTH,
+   double VAR_PKT_LENGTH,
+   uint16 MIN_PKT_LEN,
+   uint16 MAX_PKT_LEN,
 )
 
 trap_module_info_t *module_info = NULL;
-
 
 /**
  * Definition of basic module information - module name, module description, number of input and output interfaces
@@ -93,22 +105,13 @@ trap_module_info_t *module_info = NULL;
 
 
 /**
- * Definition of module parameters - every parameter has short_opt, long_opt, description,
- * flag whether an argument is required or it is optional and argument type which is NULL
- * in case the parameter does not need argument.
- * Module parameter argument types: int8, int16, int32, int64, uint8, uint16, uint32, uint64, float, string
+ * Definition of module parameters - stays empty since this module has no module specific parameters.
  */
-#define MODULE_PARAMS(PARAM) \
-  PARAM('m', "mult", "Multiplies the sum of received numbers with ARG of the parameter.", required_argument, "int32")
-//PARAM(char, char *, char *, no_argument  or  required_argument, char *)
+#define MODULE_PARAMS(PARAM)
+
 /**
- * To define positional parameter ("param" instead of "-m param" or "--mult param"), use the following definition:
- * PARAM('-', "", "Parameter description", required_argument, "string")
- * There can by any argument type mentioned few lines before.
- * This parameter will be listed in Additional parameters in module help output
+ * Flag variable which manage the loop
  */
-
-
 static int stop = 0;
 
 /**
@@ -116,11 +119,92 @@ static int stop = 0;
  */
 TRAP_DEFAULT_SIGNAL_HANDLER(stop = 1)
 
+/**
+ *  Processing function.
+ */
+static inline int process_flow(ur_template_t* in_tmplt, const void* in_rec, ur_template_t* out_tmplt, void* out_rec) {
+   
+   //First read input fields
+   // scalars:
+   uint64_t bytes = ur_get(in_tmplt, in_rec, F_BYTES);
+   uint64_t bytes_rev = ur_get(in_tmplt, in_rec, F_BYTES_REV);
+   ur_time_t time_start = ur_get(in_tmplt, in_rec, F_TIME_FIRST);
+   ur_time_t time_last = ur_get(in_tmplt, in_rec, F_TIME_LAST);
+   uint32_t packets = ur_get(in_tmplt, in_rec, F_PACKETS);
+   uint32_t packets_rev = ur_get(in_tmplt, in_rec, F_PACKETS_REV);
+   // vectors:
+   int8_t* pkt_dirs = (int8_t*)ur_get_ptr(in_tmplt, in_rec, F_PPI_PKT_DIRECTIONS);
+   uint16_t* pkt_lens = (uint16_t*)ur_get_ptr(in_tmplt, in_rec, F_PPI_PKT_LENGTHS);
+   ur_time_t* pkt_times = (ur_time_t*)ur_get_ptr(in_tmplt, in_rec, F_PPI_PKT_TIMES);
+   //uint8_t* pkt_flags = (uint8_t*)ur_get_ptr(in_tmplt, in_rec, F_PPI_PKT_FLAGS);
+
+   // Then compute features
+   // 1. Duration
+   uint64_t time_duration_ms = ur_timediff(time_last, time_start);
+   // 2. Totals
+   uint64_t bytes_total = bytes + bytes_rev;
+   uint32_t packets_total = packets + packets_rev;
+   // 3. Feature ratios
+   double bytes_ratio = bytes_rev == 0 ? 0 : (double)bytes/(double)bytes_rev;
+   double packets_ratio = packets_rev == 0 ? 0 : (double)packets/(double)packets_rev;
+   // 4. "Features" per milisecond
+   double bytes_per_ms = (double)(bytes+bytes_rev)/(double)time_duration_ms;
+   double packets_per_ms = (double)(packets+packets_rev)/(double)time_duration_ms;
+   // 5. Arrays
+   uint16_t pkt_dirs_len = ur_get_var_len(in_tmplt, in_rec, F_PPI_PKT_DIRECTIONS);
+   uint32_t sent = 0, recv = 0, interval_sum = 0, interval_cnt = 0;
+   uint16_t min_pkt_length = INT16_MAX, max_pkt_length = 0;
+   uint64_t pkt_length_sum = 0, pkt_length_sum_squared = 0; // use case is calculate mean and var in one interation
+
+   // use only one loop through all vectors. Invariant is all arrays are always the same length
+   for(int i = 0; i < pkt_dirs_len; ++i) {
+      // direction count
+      pkt_dirs[i] == 1 ? sent++ : recv++;
+      // intervals and time stuff
+      interval_sum += (i < pkt_dirs_len-1) ? ur_timediff(pkt_times[i+1], pkt_times[i]) : 0;
+      interval_cnt += 1;
+      // length statisrics
+      pkt_length_sum += pkt_lens[i]; pkt_length_sum_squared += pkt_lens[i]*pkt_lens[i];
+      min_pkt_length = pkt_lens[i] < min_pkt_length ? pkt_lens[i] : min_pkt_length;
+      max_pkt_length = pkt_lens[i] > max_pkt_length ? pkt_lens[i] : max_pkt_length;
+   }
+   // final statistical calculations
+   double mean_pkt_time = interval_cnt == 0 ? 0 : (double)interval_sum / (double)interval_cnt;
+   double mean_pkt_len = pkt_dirs_len == 0 ? 0 : (double)pkt_length_sum / (double)pkt_dirs_len;
+   double var_pkt_len  = mean_pkt_len == 0 ? 0 : ((double)pkt_length_sum_squared/(double)pkt_dirs_len) - (mean_pkt_len*mean_pkt_len);
+
+   // Finally, fill the output record
+
+   // Original fields, only copy //TODO make it macro
+   ur_set(out_tmplt, out_rec, F_DST_IP, ur_get(in_tmplt, in_rec, F_DST_IP));
+   ur_set(out_tmplt, out_rec, F_SRC_IP, ur_get(in_tmplt, in_rec, F_SRC_IP));
+   ur_set(out_tmplt, out_rec, F_TIME_FIRST, ur_get(in_tmplt, in_rec, F_TIME_FIRST));
+   ur_set(out_tmplt, out_rec, F_TIME_LAST, ur_get(in_tmplt, in_rec, F_TIME_LAST));
+   ur_set(out_tmplt, out_rec, F_BYTES, ur_get(in_tmplt, in_rec, F_BYTES));
+   ur_set(out_tmplt, out_rec, F_BYTES_REV, ur_get(in_tmplt, in_rec, F_BYTES_REV));
+   ur_set(out_tmplt, out_rec, F_PACKETS, ur_get(in_tmplt, in_rec, F_PACKETS));
+   ur_set(out_tmplt, out_rec, F_PACKETS_REV, ur_get(in_tmplt, in_rec, F_PACKETS_REV));
+   // New fields
+   ur_set(out_tmplt, out_rec, F_BYTES_RATIO, bytes_ratio);
+   ur_set(out_tmplt, out_rec, F_TIME_DUR_MS, time_duration_ms);
+   ur_set(out_tmplt, out_rec, F_BYTES_PER_MS, bytes_per_ms);
+   ur_set(out_tmplt, out_rec, F_PACKETS_PER_MS, packets_per_ms);
+   ur_set(out_tmplt, out_rec, F_PACKETS_RATIO, packets_ratio);
+   ur_set(out_tmplt, out_rec, F_PACKETS_TOTAL, packets_total);
+   ur_set(out_tmplt, out_rec, F_BYTES_TOTAL, bytes_total);
+   ur_set(out_tmplt, out_rec, F_SENT_PERCENTAGE, sent+recv == 0 ? 0 : sent/(sent+recv));
+   ur_set(out_tmplt, out_rec, F_RECV_PERCENTAGE, sent+recv == 0 ? 0 : recv/(sent+recv));
+   ur_set(out_tmplt, out_rec, F_MEAN_TIME_BETWEEN_PKTS, mean_pkt_time);
+   ur_set(out_tmplt, out_rec, F_MEAN_PKT_LENGTH, mean_pkt_len);
+   ur_set(out_tmplt, out_rec, F_VAR_PKT_LENGTH, var_pkt_len);
+   
+   return 0;
+}
+
 int main(int argc, char **argv)
 {
    int ret;
    signed char opt;
-   int mult = 1;
 
    /* **** TRAP initialization **** */
 
@@ -147,9 +231,6 @@ int main(int argc, char **argv)
     */
    while ((opt = TRAP_GETOPT(argc, argv, module_getopt_string, long_options)) != -1) {
       switch (opt) {
-      case 'm':
-         mult = atoi(optarg);
-         break;
       default:
          fprintf(stderr, "Invalid arguments.\n");
          FREE_MODULE_INFO_STRUCT(MODULE_BASIC_INFO, MODULE_PARAMS);
@@ -164,7 +245,7 @@ int main(int argc, char **argv)
       fprintf(stderr, "Error: Input template could not be created.\n");
       return -1;
    }
-   ur_template_t *out_tmplt = ur_create_output_template(0, OUT_SPEC, NULL);
+   ur_template_t *out_tmplt = ur_create_output_template(0, IN_SPEC "," NEW_FEATURES, NULL);
    if (out_tmplt == NULL){
       ur_free_template(in_tmplt);
       fprintf(stderr, "Error: Output template could not be created.\n");
@@ -179,6 +260,8 @@ int main(int argc, char **argv)
       fprintf(stderr, "Error: Memory allocation problem (output record).\n");
       return -1;
    }
+
+   fprintf(stdout, "Info: Input template is set as \n" IN_SPEC "\n");
 
 
    /* **** Main processing loop **** */
@@ -207,27 +290,9 @@ int main(int argc, char **argv)
       }
 
       // PROCESS THE DATA
-
-      //Reading input fields
-      uint64_t bytes = ur_get(in_tmplt, in_rec, F_BYTES);
-      uint64_t bytes_rev = ur_get(in_tmplt, in_rec, F_BYTES_REV);
-      ur_time_t time_start = ur_get(in_tmplt, in_rec, F_TIME_FIRST);
-      ur_time_t time_last = ur_get(in_tmplt, in_rec, F_TIME_LAST);
-      uint16_t * pkt_lens = ur_get(in_tmplt, in_rec, F_PPI_PKT_LENGTHS);
-
-
-
-      //Compute features
-      double bytes_ratio = bytes_rev == 0 ? 0 : (double)bytes/(double)bytes_rev;
-      uint64_t time_duration_ms = ur_timediff(time_last, time_start);
-      double bytes_per_ms = (double)(bytes+bytes_rev)/(double)time_duration_ms;
-
-      // Fill output record
-      ur_copy_fields(out_tmplt, out_rec, in_tmplt, in_rec);
-      ur_set(out_tmplt, out_rec, F_BYTES_RATIO, bytes_ratio);
-      ur_set(out_tmplt, out_rec, F_TIME_DUR_MS, time_duration_ms);
-      ur_set(out_tmplt, out_rec, F_BYTES_PER_MS, time_duration_ms);      
-
+      if (process_flow(in_tmplt, in_rec, out_tmplt, out_rec) == -1){
+         fprintf(stderr, "Error: Processing error");
+      }
 
       // Send record to interface 0.
       // Block if ifc is not ready (unless a timeout is set using trap_ifcctl)

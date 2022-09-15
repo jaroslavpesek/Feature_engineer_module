@@ -115,3 +115,7 @@ Makefile
 config.h
 config.h
 configure~
+
+fields.c
+fields.h
+feature_engineer_module
