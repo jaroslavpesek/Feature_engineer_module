@@ -197,6 +197,8 @@ static inline int process_flow(ur_template_t* in_tmplt, const void* in_rec, ur_t
    ur_set(out_tmplt, out_rec, F_MEAN_TIME_BETWEEN_PKTS, mean_pkt_time);
    ur_set(out_tmplt, out_rec, F_MEAN_PKT_LENGTH, mean_pkt_len);
    ur_set(out_tmplt, out_rec, F_VAR_PKT_LENGTH, var_pkt_len);
+   ur_set(out_tmplt, out_rec, F_MIN_PKT_LENGTH, min_pkt_length);
+   ur_set(out_tmplt, out_rec, F_MAX_PKT_LENGTH, min_pkt_length);
    
    return 0;
 }
