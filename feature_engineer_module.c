@@ -158,7 +158,7 @@ static inline int process_flow(ur_template_t* in_tmplt, const void* in_rec, ur_t
    uint64_t pkt_length_sum = 0, pkt_length_sum_squared = 0; // use case is calculate mean and var in one interation
    uint64_t bytes_sent = 0, bytes_recv = 0; // for data symmetry (ratio of sent/recv bytes)
 
-   // use only one loop through all vectors. Invariant is all arrays are always the same length
+   // Use only one loop through all vectors. Invariant is all arrays are always the same length
    for(int i = 0; i < pkt_dirs_len; ++i) {
       // direction count
       pkt_dirs[i] == 1 ? sent++ : recv++;
