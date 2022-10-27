@@ -163,7 +163,7 @@ static inline int process_flow(ur_template_t* in_tmplt, const void* in_rec, ur_t
       // intervals and time stuff
       interval_sum += (i < pkt_dirs_len-1) ? ur_timediff(pkt_times[i+1], pkt_times[i]) : 0;
       interval_cnt += 1;
-      // length statisrics
+      // length statistics
       pkt_length_sum += pkt_lens[i]; pkt_length_sum_squared += pkt_lens[i]*pkt_lens[i];
       min_pkt_length = pkt_lens[i] < min_pkt_length ? pkt_lens[i] : min_pkt_length;
       max_pkt_length = pkt_lens[i] > max_pkt_length ? pkt_lens[i] : max_pkt_length;
