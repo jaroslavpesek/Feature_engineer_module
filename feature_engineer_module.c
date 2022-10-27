@@ -125,7 +125,7 @@ TRAP_DEFAULT_SIGNAL_HANDLER(stop = 1)
  */
 static inline int process_flow(ur_template_t* in_tmplt, const void* in_rec, ur_template_t* out_tmplt, void* out_rec) {
    
-   //First read input fields
+   // First read input fields
    // scalars:
    uint64_t bytes = ur_get(in_tmplt, in_rec, F_BYTES);
    uint64_t bytes_rev = ur_get(in_tmplt, in_rec, F_BYTES_REV);
