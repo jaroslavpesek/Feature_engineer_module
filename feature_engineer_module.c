@@ -59,7 +59,7 @@
  * Define input template spec and newly calculated features
  */
 #define IN_SPEC "DST_IP,SRC_IP,BYTES,BYTES_REV,TIME_FIRST,TIME_LAST,PACKETS,PACKETS_REV,PPI_PKT_DIRECTIONS,PPI_PKT_LENGTHS,PPI_PKT_TIMES,PPI_PKT_FLAGS"
-#define NEW_FEATURES "MAX_PKT_LEN,MIN_PKT_LEN,VAR_PKT_LENGTH,MEAN_PKT_LENGTH,MEAN_TIME_BETWEEN_PKTS,RECV_PERCENTAGE,SENT_PERCENTAGE,BYTES_TOTAL,PACKETS_TOTAL,PACKETS_RATIO,PACKETS_PER_MS,BYTES_PER_MS,BYTES_RATIO,TIME_DUR_MS"
+#define NEW_FEATURES "MAX_PKT_LEN,MIN_PKT_LEN,VAR_PKT_LENGTH,MEAN_PKT_LENGTH,MEAN_TIME_BETWEEN_PKTS,RECV_PERCENTAGE,SENT_PERCENTAGE,BYTES_TOTAL,PACKETS_TOTAL,PACKETS_RATIO,PACKETS_PER_MS,BYTES_PER_MS,BYTES_RATIO,TIME_DUR_MS,DATA_SYMMETRY"
 
 /**
  * Definition of fields used in unirec templates (for both input and output interfaces)
@@ -91,6 +91,7 @@ UR_FIELDS (
    double VAR_PKT_LENGTH,
    uint16 MIN_PKT_LEN,
    uint16 MAX_PKT_LEN,
+   double DATA_SYMMETRY
 )
 
 trap_module_info_t *module_info = NULL;
@@ -124,7 +125,7 @@ TRAP_DEFAULT_SIGNAL_HANDLER(stop = 1)
  */
 static inline int process_flow(ur_template_t* in_tmplt, const void* in_rec, ur_template_t* out_tmplt, void* out_rec) {
    
-   //First read input fields
+   // First read input fields
    // scalars:
    uint64_t bytes = ur_get(in_tmplt, in_rec, F_BYTES);
    uint64_t bytes_rev = ur_get(in_tmplt, in_rec, F_BYTES_REV);
@@ -155,15 +156,17 @@ static inline int process_flow(ur_template_t* in_tmplt, const void* in_rec, ur_t
    uint32_t sent = 0, recv = 0, interval_sum = 0, interval_cnt = 0;
    uint16_t min_pkt_length = INT16_MAX, max_pkt_length = 0;
    uint64_t pkt_length_sum = 0, pkt_length_sum_squared = 0; // use case is calculate mean and var in one interation
+   uint64_t bytes_sent = 0, bytes_recv = 0; // for data symmetry (ratio of sent/recv bytes)
 
-   // use only one loop through all vectors. Invariant is all arrays are always the same length
+   // Use only one loop through all vectors. Invariant is all arrays are always the same length
    for(int i = 0; i < pkt_dirs_len; ++i) {
       // direction count
       pkt_dirs[i] == 1 ? sent++ : recv++;
+      pkt_dirs[i] == 1 ? bytes_sent += pkt_lens[i] : bytes_recv += pkt_lens[i];
       // intervals and time stuff
       interval_sum += (i < pkt_dirs_len-1) ? ur_timediff(pkt_times[i+1], pkt_times[i]) : 0;
       interval_cnt += 1;
-      // length statisrics
+      // length statistics
       pkt_length_sum += pkt_lens[i]; pkt_length_sum_squared += pkt_lens[i]*pkt_lens[i];
       min_pkt_length = pkt_lens[i] < min_pkt_length ? pkt_lens[i] : min_pkt_length;
       max_pkt_length = pkt_lens[i] > max_pkt_length ? pkt_lens[i] : max_pkt_length;
@@ -172,6 +175,7 @@ static inline int process_flow(ur_template_t* in_tmplt, const void* in_rec, ur_t
    double mean_pkt_time = interval_cnt == 0 ? 0 : (double)interval_sum / (double)interval_cnt;
    double mean_pkt_len = pkt_dirs_len == 0 ? 0 : (double)pkt_length_sum / (double)pkt_dirs_len;
    double var_pkt_len  = mean_pkt_len == 0 ? 0 : ((double)pkt_length_sum_squared/(double)pkt_dirs_len) - (mean_pkt_len*mean_pkt_len);
+   double data_symmetry = bytes_sent / bytes_recv;
 
    // Finally, fill the output record
 
@@ -197,6 +201,9 @@ static inline int process_flow(ur_template_t* in_tmplt, const void* in_rec, ur_t
    ur_set(out_tmplt, out_rec, F_MEAN_TIME_BETWEEN_PKTS, mean_pkt_time);
    ur_set(out_tmplt, out_rec, F_MEAN_PKT_LENGTH, mean_pkt_len);
    ur_set(out_tmplt, out_rec, F_VAR_PKT_LENGTH, var_pkt_len);
+   ur_set(out_tmplt, out_rec, F_MIN_PKT_LENGTH, min_pkt_length);
+   ur_set(out_tmplt, out_rec, F_MAX_PKT_LENGTH, min_pkt_length);
+   ur_set(out_tmplt, out_rec, F_DATA_SYMMETRY, data_symmetry);
    
    return 0;
 }
